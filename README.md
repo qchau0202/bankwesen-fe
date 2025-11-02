@@ -2,7 +2,7 @@
 
 A modern banking application frontend built with React, TypeScript, and Vite.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -11,17 +11,23 @@ A modern banking application frontend built with React, TypeScript, and Vite.
 
 ### Installation & Running
 
-1. **Install dependencies**
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd bankwesen-fe
+   ```
+
+2. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. **Start development server**
+3. **Start development server**
    ```bash
    npm run dev
    ```
 
-3. **Open your browser**
+4. **Open your browser**
    - The app will be available at `http://localhost:5173`
    - Default route redirects to `/auth` (login page)
 
@@ -38,7 +44,7 @@ npm run preview
 npm run lint
 ```
 
-## 📦 Tech Stack
+## Tech Stack
 
 - **React 19** - UI library
 - **TypeScript** - Type safety
@@ -48,7 +54,7 @@ npm run lint
 - **React Router** - Navigation
 - **React Hot Toast** - Notifications
 
-## 🔐 Features
+## Features
 
 - User authentication (login/register)
 - LocalStorage-based user management
