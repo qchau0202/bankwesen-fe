@@ -1,13 +1,20 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { authApi } from "@/lib/mockApi";
+import { initializeMockData } from "@/lib/mockData";
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
+
+  useEffect(() => {
+    // Initialize mock data on mount
+    initializeMockData();
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
@@ -45,26 +52,24 @@ const AuthPage = () => {
 const LoginForm = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    email: "",
+    username: "",
     password: "",
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Get users from localStorage
-    const users = JSON.parse(localStorage.getItem("users") || "[]");
-    
-    // Check if user exists
-    const user = users.find((u: any) => u.email === formData.email && u.password === formData.password);
-    
-    if (user) {
-      // Store current user in localStorage
-      localStorage.setItem("currentUser", JSON.stringify(user));
-      toast.success("Welcome back!");
-      navigate("/home");
-    } else {
-      toast.error("Invalid email or password");
+    try {
+      const response = await authApi.login(formData.username, formData.password);
+      
+      if (response.status === 200 && response.data) {
+        toast.success("Welcome back!");
+        navigate("/tuition-payment");
+      } else {
+        toast.error(response.error || "Invalid username or password");
+      }
+    } catch (error) {
+      toast.error("Login failed. Please try again.");
     }
   };
 
@@ -76,13 +81,13 @@ const LoginForm = () => {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="login-email">Email</Label>
+        <Label htmlFor="login-username">Username</Label>
         <Input
-          id="login-email"
-          type="email"
-          name="email"
-          placeholder="Enter your email"
-          value={formData.email}
+          id="login-username"
+          type="text"
+          name="username"
+          placeholder="Enter your username"
+          value={formData.username}
           onChange={handleChange}
           required
         />
@@ -117,8 +122,10 @@ const LoginForm = () => {
 
 const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
   const [formData, setFormData] = useState({
+    username: "",
     name: "",
     email: "",
+    phone: "",
     password: "",
     confirmPassword: "",
   });
@@ -134,7 +141,11 @@ const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
     // Get existing users
     const users = JSON.parse(localStorage.getItem("users") || "[]");
     
-    // Check if email already exists
+    // Check if username or email already exists
+    if (users.some((u: any) => u.username === formData.username)) {
+      toast.error("Username already registered!");
+      return;
+    }
     if (users.some((u: any) => u.email === formData.email)) {
       toast.error("Email already registered!");
       return;
@@ -143,9 +154,13 @@ const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
     // Add new user
     const newUser = {
       id: Date.now().toString(),
+      username: formData.username,
       name: formData.name,
       email: formData.email,
+      phone: formData.phone,
       password: formData.password,
+      balance: 0,
+      transactionHistory: [],
     };
     
     users.push(newUser);
@@ -162,6 +177,18 @@ const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <Label htmlFor="register-username">Username</Label>
+        <Input
+          id="register-username"
+          type="text"
+          name="username"
+          placeholder="Enter your username"
+          value={formData.username}
+          onChange={handleChange}
+          required
+        />
+      </div>
       <div className="space-y-2">
         <Label htmlFor="register-name">Full Name</Label>
         <Input
@@ -182,6 +209,18 @@ const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
           name="email"
           placeholder="Enter your email"
           value={formData.email}
+          onChange={handleChange}
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="register-phone">Phone Number</Label>
+        <Input
+          id="register-phone"
+          type="tel"
+          name="phone"
+          placeholder="Enter your phone number"
+          value={formData.phone}
           onChange={handleChange}
           required
         />
