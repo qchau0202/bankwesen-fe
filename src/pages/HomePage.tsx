@@ -16,9 +16,9 @@ const HomePage = () => {
         <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
             <div className="max-w-4xl mx-auto">
                 <div className="mb-6">
-                    <h1 className="text-3xl font-bold mb-2">iBanking System</h1>
+                    <h1 className="text-3xl font-bold mb-2">Bankwesen iBanking System</h1>
                     <p className="text-muted-foreground">Welcome, {currentUser.name || "User"}</p>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-lg font-bold text-muted-foreground">
                         Balance: {currentUser.balance?.toLocaleString() || "0"} VND
                     </p>
                 </div>

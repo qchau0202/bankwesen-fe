@@ -1,24 +1,19 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { tuitionApi, paymentApi, otpApi, transactionApi } from "@/lib/mockApi";
-import type { Payment } from "@/lib/mockData";
+import type { Payment, SemesterTuition, Transaction } from "@/lib/mockData";
+import OTPVerificationCard from "@/components/tuition/OTPVerificationCard";
+import PayerInfoCard from "@/components/tuition/PayerInfoCard";
+import TuitionInfoCard from "@/components/tuition/TuitionInfoCard";
+import PaymentInfoCard from "@/components/tuition/PaymentInfoCard";
+import TuitionConfirmationDialog from "@/components/tuition/TuitionConfirmationDialog";
+import PaymentSuccessCard from "@/components/tuition/PaymentSuccessCard";
 
 const TuitionPaymentPage = () => {
   const navigate = useNavigate();
-  const [step, setStep] = useState<"form" | "otp">("form");
+  const [step, setStep] = useState<"form" | "otp" | "success">("form");
   const [loading, setLoading] = useState(false);
   
   // Get current user from localStorage
@@ -30,6 +25,8 @@ const TuitionPaymentPage = () => {
     studentName: "",
     tuitionAmount: "",
   });
+  const [studentSemesters, setStudentSemesters] = useState<SemesterTuition[]>([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState<string | null>(null);
 
   // Payment and OTP state
   const [currentPayment, setCurrentPayment] = useState<Payment | null>(null);
@@ -40,6 +37,7 @@ const TuitionPaymentPage = () => {
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(0);
+  const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
 
   // Check if user is logged in
   useEffect(() => {
@@ -57,18 +55,30 @@ const TuitionPaymentPage = () => {
           const response = await tuitionApi.getTuitionInfo(formData.studentId);
           
           if (response.status === 200 && response.data) {
+          const semesters = response.data.semesters || [];
+          const outstandingSemesters = semesters.filter((semester) => semester.status !== "paid");
+          const totalOutstanding = outstandingSemesters.reduce((sum, semester) => sum + semester.amount, 0);
+
             setFormData(prev => ({
               ...prev,
               studentName: response.data!.studentName,
-              tuitionAmount: response.data!.tuitionAmount.toString(),
+            tuitionAmount: totalOutstanding > 0 ? totalOutstanding.toString() : "0",
             }));
+          setStudentSemesters(semesters);
+
+          const defaultSemester = (outstandingSemesters[0] ?? semesters[0]) ?? null;
+          setSelectedSemesterId(defaultSemester ? defaultSemester.id : null);
 
             // Check balance
-            const balanceCheck = tuitionApi.checkBalance(currentUser.id, response.data!.tuitionAmount);
+          if (totalOutstanding === 0) {
+            setBalanceError("This student has no outstanding tuition to pay.");
+            } else {
+            const balanceCheck = tuitionApi.checkBalance(currentUser.id, totalOutstanding);
             if (!balanceCheck.hasEnough) {
-              setBalanceError(`Insufficient balance. Your balance: ${balanceCheck.balance.toLocaleString()} VND, Required: ${response.data!.tuitionAmount.toLocaleString()} VND`);
+              setBalanceError(`Insufficient balance. Your balance: ${balanceCheck.balance.toLocaleString()} VND, Required: ${totalOutstanding.toLocaleString()} VND`);
             } else {
               setBalanceError(null);
+            }
             }
           } else {
             setFormData(prev => ({
@@ -76,10 +86,14 @@ const TuitionPaymentPage = () => {
               studentName: "",
               tuitionAmount: "",
             }));
+          setStudentSemesters([]);
+          setSelectedSemesterId(null);
             setBalanceError(response.error || "Student not found");
           }
         } catch (error) {
           setBalanceError("Failed to fetch tuition information");
+        setStudentSemesters([]);
+        setSelectedSemesterId(null);
         }
       } else {
         setFormData(prev => ({
@@ -88,6 +102,8 @@ const TuitionPaymentPage = () => {
           tuitionAmount: "",
         }));
         setBalanceError(null);
+      setStudentSemesters([]);
+      setSelectedSemesterId(null);
       }
     };
 
@@ -119,10 +135,7 @@ const TuitionPaymentPage = () => {
     }
   }, [otpExpiresAt]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
+  // input changes are handled inside components via prop callbacks
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +152,12 @@ const TuitionPaymentPage = () => {
       return;
     }
 
+    const hasOutstandingSemesters = studentSemesters.some((semester) => semester.status !== "paid");
+    if (!hasOutstandingSemesters || parseFloat(formData.tuitionAmount || "0") <= 0) {
+      toast.error("No outstanding tuition balance found for this student.");
+      return;
+    }
+
     // Show confirmation dialog
     setShowConfirmDialog(true);
   };
@@ -149,11 +168,11 @@ const TuitionPaymentPage = () => {
 
     try {
       // Create payment
-      const paymentResponse = await paymentApi.createPayment(
-        formData.studentId,
-        formData.studentName,
-        parseFloat(formData.tuitionAmount)
-      );
+      const paymentResponse = await paymentApi.createPayment({
+        studentId: formData.studentId,
+        studentName: formData.studentName,
+        semesters: studentSemesters,
+      });
 
       if (paymentResponse.status === 201 && paymentResponse.data) {
         setCurrentPayment(paymentResponse.data);
@@ -221,6 +240,7 @@ const TuitionPaymentPage = () => {
 
         if (transactionResponse.status === 201 && transactionResponse.data) {
           toast.success("Transaction completed successfully!");
+          setLastTransaction(transactionResponse.data);
           
           // Update user balance in localStorage
           const updatedUser = JSON.parse(localStorage.getItem("currentUser") || "{}");
@@ -235,15 +255,8 @@ const TuitionPaymentPage = () => {
             localStorage.setItem("users", JSON.stringify(users));
           }
 
-          // Reset form and go back
-          setTimeout(() => {
-            setStep("form");
-            setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
-            setCurrentPayment(null);
-            setOtpCode("");
-            setOtpAttempts(0);
-            navigate("/home");
-          }, 2000);
+          // Move to success step and let user decide next navigation
+          setStep("success");
         } else {
           toast.error(transactionResponse.error || "Transaction failed");
         }
@@ -261,6 +274,8 @@ const TuitionPaymentPage = () => {
           setCurrentPayment(null);
           setOtpCode("");
           setOtpAttempts(0);
+          setStudentSemesters([]);
+          setSelectedSemesterId(null);
         } else {
           const attempts = otpAttempts + 1;
           setOtpAttempts(attempts);
@@ -289,6 +304,8 @@ const TuitionPaymentPage = () => {
       setCurrentPayment(null);
       setOtpCode("");
       setOtpAttempts(0);
+      setStudentSemesters([]);
+      setSelectedSemesterId(null);
     } catch (error) {
       toast.error("Failed to cancel payment");
     } finally {
@@ -296,79 +313,65 @@ const TuitionPaymentPage = () => {
     }
   };
 
-  if (step === "otp") {
-    const isExpired = timeLeft === 0;
+  const hasOutstandingSemesters = studentSemesters.some((semester) => semester.status !== "paid");
 
+  if (step === "otp") {
     return (
       <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
         <div className="max-w-2xl mx-auto">
-          <Card>
-            <CardHeader>
-              <CardTitle>OTP Verification</CardTitle>
-              <CardDescription>
-                Enter the OTP code sent to your email ({currentUser.email})
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="otp">OTP Code</Label>
-                  <Input
-                    id="otp"
-                    type="text"
-                    placeholder="Enter 6-digit OTP"
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                    disabled={loading}
-                  />
-                  {otpExpiresAt && (
-                    <p className="text-sm text-muted-foreground">
-                      {isExpired ? (
-                        <span className="text-red-500">OTP expired</span>
-                      ) : (
-                        `Expires in: ${Math.floor(timeLeft / 60)}:${String(timeLeft % 60).padStart(2, "0")}`
-                      )}
-                    </p>
-                  )}
-                  {otpAttempts > 0 && (
-                    <p className="text-sm text-yellow-600">
-                      Attempts: {otpAttempts}/3
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCancelPayment}
-                    disabled={loading}
-                    className="font-bold"
-                  >
-                    Cancel
-                  </Button>
-                  {canResend || isExpired ? (
-                    <Button
-                      type="button"
-                      onClick={handleResendOTP}
-                      disabled={loading}
-                      className="font-bold"
-                    >
-                      Resend OTP
-                    </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    onClick={handleVerifyOTP}
-                    disabled={loading || !otpCode || otpCode.length !== 6}
-                    className="font-bold"
-                  >
-                    {loading ? "Verifying..." : "Confirm Payment"}
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <OTPVerificationCard
+            email={currentUser.email}
+            otpCode={otpCode}
+            setOtpCode={setOtpCode}
+            timeLeft={timeLeft}
+            canResend={canResend}
+            otpAttempts={otpAttempts}
+            loading={loading}
+            onCancel={handleCancelPayment}
+            onResend={handleResendOTP}
+            onVerify={handleVerifyOTP}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "success" && lastTransaction) {
+    return (
+      <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
+        <div className="max-w-2xl mx-auto">
+          <PaymentSuccessCard
+            transactionId={lastTransaction.id}
+            studentId={lastTransaction.studentId}
+            studentName={lastTransaction.studentName}
+            amount={lastTransaction.amount}
+            createdAt={lastTransaction.createdAt}
+            semesters={lastTransaction.semesters || []}
+            onBackHome={() => {
+              setStep("form");
+              setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
+              setCurrentPayment(null);
+              setOtpCode("");
+              setOtpAttempts(0);
+              setStudentSemesters([]);
+              setSelectedSemesterId(null);
+              navigate("/home");
+            }}
+            onViewHistory={({ transactionId: txId, year, semester }) => {
+              setStep("form");
+              setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
+              setCurrentPayment(null);
+              setOtpCode("");
+              setOtpAttempts(0);
+              setStudentSemesters([]);
+              setSelectedSemesterId(null);
+              const params = new URLSearchParams();
+              params.set("tx", txId);
+              if (year) params.set("y", String(year));
+              if (semester) params.set("sem", semester === "Semester 1" ? "1" : "2");
+              navigate(`/transaction-history?${params.toString()}`);
+            }}
+          />
         </div>
       </div>
     );
@@ -383,144 +386,20 @@ const TuitionPaymentPage = () => {
 
         <form onSubmit={handleSubmit} className="max-w-full mx-auto">
           <div className="flex flex-col md:flex-row gap-4">
-            {/* Section 1: Payer Information */}
-            <Card className="flex-1">
-              <CardHeader>
-                <CardTitle>Payer Information</CardTitle>
-                <CardDescription>
-                  Your account information (auto-filled and locked)
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="payer-name">Full Name</Label>
-                  <Input
-                    id="payer-name"
-                    type="text"
-                    value={currentUser.name || ""}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="payer-phone">Phone Number</Label>
-                  <Input
-                    id="payer-phone"
-                    type="tel"
-                    value={currentUser.phone || ""}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="payer-email">Email Address</Label>
-                  <Input
-                    id="payer-email"
-                    type="email"
-                    value={currentUser.email || ""}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Section 2: Tuition Information */}
-            <Card className="flex-1">
-              <CardHeader>
-                <CardTitle>Tuition Information</CardTitle>
-                <CardDescription>
-                  Enter the student ID to retrieve tuition information
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="student-id">Student ID (MSSV)</Label>
-                  <Input
-                    id="student-id"
-                    name="studentId"
-                    type="text"
-                    placeholder="Enter student ID (e.g., SV001)"
-                    value={formData.studentId}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="student-name">Student Full Name</Label>
-                  <Input
-                    id="student-name"
-                    name="studentName"
-                    type="text"
-                    placeholder="Student name will appear here"
-                    value={formData.studentName}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="tuition-amount">Tuition Amount</Label>
-                  <Input
-                    id="tuition-amount"
-                    name="tuitionAmount"
-                    type="text"
-                    placeholder="Amount will be retrieved automatically"
-                    value={formData.tuitionAmount ? `${parseFloat(formData.tuitionAmount).toLocaleString()} VND` : ""}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Section 3: Payment Information */}
-            <Card className="flex-1">
-              <CardHeader>
-                <CardTitle>Payment Information</CardTitle>
-                <CardDescription>
-                  Review your payment details before confirming
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="available-balance">Available Balance</Label>
-                  <Input
-                    id="available-balance"
-                    type="text"
-                    value={`${(currentUser.balance || 0).toLocaleString()} VND`}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="payment-amount">Tuition Amount to Pay</Label>
-                  <Input
-                    id="payment-amount"
-                    type="text"
-                    value={formData.tuitionAmount ? `${parseFloat(formData.tuitionAmount).toLocaleString()} VND` : "0 VND"}
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                {balanceError && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-                    <p className="text-sm text-red-600">{balanceError}</p>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label>Terms and Conditions</Label>
-                  <div className="p-4 bg-muted rounded-md text-sm">
-                    <p className="mb-2">By proceeding with this transaction, you agree to:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Pay the full tuition amount (no partial payments allowed)</li>
-                      <li>Ensure sufficient balance is available</li>
-                      <li>Verify all information before confirmation</li>
-                      <li>Accept that the transaction is final once confirmed</li>
-                    </ul>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <PayerInfoCard payer={{ name: currentUser.name, phone: currentUser.phone, email: currentUser.email }} />
+            <TuitionInfoCard
+              formData={formData}
+            semesters={studentSemesters}
+            selectedSemesterId={selectedSemesterId}
+              onStudentIdChange={(value) => setFormData(prev => ({ ...prev, studentId: value }))}
+            onSelectSemester={(value) => setSelectedSemesterId(value || null)}
+            />
+            <PaymentInfoCard
+              availableBalance={currentUser.balance || 0}
+              tuitionAmount={formData.tuitionAmount}
+              balanceError={balanceError}
+            semesters={studentSemesters}
+            />
           </div>
 
           {/* Transaction Confirmation Button */}
@@ -536,7 +415,13 @@ const TuitionPaymentPage = () => {
             </Button>
             <Button
               type="submit"
-              disabled={loading || !formData.studentId || !formData.studentName || !!balanceError}
+              disabled={
+                loading ||
+                !formData.studentId ||
+                !formData.studentName ||
+                !!balanceError ||
+                !hasOutstandingSemesters
+              }
               className="font-bold"
             >
               {loading ? "Processing..." : "Confirm Transaction"}
@@ -544,64 +429,25 @@ const TuitionPaymentPage = () => {
           </div>
         </form>
 
-        {/* Confirmation Dialog */}
-        <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Confirm Transaction</DialogTitle>
-              <DialogDescription>
-                Please review the payment details before confirming. This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Payer Information:</p>
-                <div className="pl-4 space-y-1 text-sm text-muted-foreground">
-                  <p>Name: {currentUser.name}</p>
-                  <p>Email: {currentUser.email}</p>
-                  <p>Phone: {currentUser.phone}</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Tuition Information:</p>
-                <div className="pl-4 space-y-1 text-sm text-muted-foreground">
-                  <p>Student ID: {formData.studentId}</p>
-                  <p>Student Name: {formData.studentName}</p>
-                  <p>Tuition Amount: {parseFloat(formData.tuitionAmount || "0").toLocaleString()} VND</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Payment Details:</p>
-                <div className="pl-4 space-y-1 text-sm text-muted-foreground">
-                  <p>Available Balance: {(currentUser.balance || 0).toLocaleString()} VND</p>
-                  <p>Amount to Pay: {parseFloat(formData.tuitionAmount || "0").toLocaleString()} VND</p>
-                  <p className="font-semibold text-foreground">
-                    Remaining Balance: {((currentUser.balance || 0) - parseFloat(formData.tuitionAmount || "0")).toLocaleString()} VND
-                  </p>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowConfirmDialog(false)}
-                disabled={loading}
-                className="font-bold"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleConfirmPayment}
-                disabled={loading}
-                className="font-bold"
-              >
-                {loading ? "Processing..." : "Confirm & Continue"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <TuitionConfirmationDialog
+          open={showConfirmDialog}
+          loading={loading}
+          onOpenChange={setShowConfirmDialog}
+          onCancel={() => setShowConfirmDialog(false)}
+          onConfirm={handleConfirmPayment}
+          payer={{
+            name: currentUser.name,
+            email: currentUser.email,
+            phone: currentUser.phone,
+            balance: currentUser.balance,
+          }}
+          tuition={{
+            studentId: formData.studentId,
+            studentName: formData.studentName,
+            tuitionAmount: formData.tuitionAmount,
+          }}
+          semesters={studentSemesters}
+        />
       </div>
     </div>
   );

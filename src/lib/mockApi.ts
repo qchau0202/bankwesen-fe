@@ -1,7 +1,14 @@
 // Mock API functions that simulate backend API calls
 
-import { getMockStorage, MOCK_STUDENTS, MOCK_USERS } from "./mockData";
-import type { User, Student, Payment, OTP, Transaction } from "./mockData";
+import { getMockStorage, loadStudentTuitions, saveStudentTuitions } from "./mockData";
+import type {
+  User,
+  Student,
+  Payment,
+  OTP,
+  Transaction,
+  SemesterTuition,
+} from "./mockData";
 
 // Simulate JWT token
 const generateJWT = (userId: string): string => {
@@ -61,17 +68,26 @@ export const tuitionApi = {
   getTuitionInfo: async (studentId: string): Promise<{ status: number; data?: Student; error?: string }> => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const student = MOCK_STUDENTS.find((s) => s.studentId === studentId);
+    const students = loadStudentTuitions();
+    const student = students.find((s) => s.studentId === studentId);
 
     if (!student) {
       return { status: 404, error: "Student not found" };
     }
 
-    return { status: 200, data: student };
+    const outstanding = student.semesters.filter((semester) => semester.status !== "paid");
+    const totalOutstanding = outstanding.reduce((sum, semester) => sum + semester.amount, 0);
+
+    const updatedStudent: Student = {
+      ...student,
+      tuitionAmount: totalOutstanding,
+    };
+
+    return { status: 200, data: updatedStudent };
   },
 
   // Check if user has enough balance
-  checkBalance: (userId: string, tuitionAmount: number): { hasEnough: boolean; balance: number } => {
+  checkBalance: (_userId: string, tuitionAmount: number): { hasEnough: boolean; balance: number } => {
     const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
     const balance = user.balance || 0;
     return {
@@ -84,13 +100,28 @@ export const tuitionApi = {
 // 3. Payment Service API
 export const paymentApi = {
   // POST: /api/payment/
-  createPayment: async (studentId: string, studentName: string, tuitionAmount: number): Promise<{ status: number; data?: Payment; error?: string }> => {
+  createPayment: async ({
+    studentId,
+    studentName,
+    semesters,
+  }: {
+    studentId: string;
+    studentName: string;
+    semesters: SemesterTuition[];
+  }): Promise<{ status: number; data?: Payment; error?: string }> => {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
     if (!user.id) {
       return { status: 401, error: "Unauthorized" };
     }
+
+    const outstandingSemesters = semesters.filter((semester) => semester.status !== "paid");
+    if (outstandingSemesters.length === 0) {
+      return { status: 400, error: "No outstanding tuition for this student" };
+    }
+
+    const tuitionAmount = outstandingSemesters.reduce((sum, semester) => sum + semester.amount, 0);
 
     // Check balance
     const balanceCheck = tuitionApi.checkBalance(user.id, tuitionAmount);
@@ -119,6 +150,7 @@ export const paymentApi = {
       createdAt: new Date().toISOString(),
       otpAttempts: 0,
       isLocked: true, // Lock the payment
+      semesters: outstandingSemesters,
     };
 
     storage.setPayments([...storage.payments, payment]);
@@ -283,6 +315,37 @@ export const transactionApi = {
     user.balance -= payment.tuitionAmount;
     localStorage.setItem("currentUser", JSON.stringify(user));
 
+    const updatedSemesters: SemesterTuition[] = payment.semesters.map((semester) => {
+      const updated: SemesterTuition = {
+        ...semester,
+        status: "paid",
+      };
+      return updated;
+    });
+    payment.semesters = updatedSemesters;
+
+    const studentTuitions = loadStudentTuitions();
+    const studentIndex = studentTuitions.findIndex((s) => s.studentId === payment.studentId);
+    if (studentIndex !== -1) {
+      const student = studentTuitions[studentIndex];
+      const semesters: SemesterTuition[] = student.semesters.map((semester) => {
+        const paidSemester = updatedSemesters.find((s) => s.id === semester.id);
+        if (paidSemester) {
+          return { ...semester, status: "paid" };
+        }
+        return semester;
+      });
+      const remaining = semesters
+        .filter((semester) => semester.status !== "paid")
+        .reduce((sum, semester) => sum + semester.amount, 0);
+      studentTuitions[studentIndex] = {
+        ...student,
+        semesters,
+        tuitionAmount: remaining,
+      };
+      saveStudentTuitions(studentTuitions);
+    }
+
     // Update users array
     const users = JSON.parse(localStorage.getItem("users") || "[]");
     const userIndex = users.findIndex((u: User) => u.id === user.id);
@@ -302,6 +365,7 @@ export const transactionApi = {
       amount: payment.tuitionAmount,
       status: "success",
       createdAt: new Date().toISOString(),
+      semesters: updatedSemesters,
     };
 
     storage.addTransaction(transaction);
