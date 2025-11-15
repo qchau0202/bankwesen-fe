@@ -91,7 +91,14 @@ export const OTPVerificationCard: React.FC<OTPVerificationCardProps> = ({
               disabled={loading || !otpCode || otpCode.length !== 6}
               className="font-bold"
             >
-              {loading ? "Verifying..." : "Confirm Payment"}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Verifying...
+                </span>
+              ) : (
+                "Confirm Payment"
+              )}
             </Button>
           </div>
         </div>

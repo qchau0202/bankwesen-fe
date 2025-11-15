@@ -4,46 +4,35 @@ import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { authApi } from "@/lib/mockApi";
-import { initializeMockData } from "@/lib/mockData";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { authService } from "@/services/authService";
 
 const AuthPage = () => {
-  const [isLogin, setIsLogin] = useState(true);
-
+  const navigate = useNavigate();
+  
+  // Redirect if already logged in
   useEffect(() => {
-    // Initialize mock data on mount
-    initializeMockData();
-  }, []);
+    const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}");
+    const accessToken = localStorage.getItem("accessToken");
+    if (currentUser.customerId && accessToken) {
+      navigate("/tuition-payment");
+    }
+  }, [navigate]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-muted p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">
-            {isLogin ? "Login to Bankwesen" : "Create an account"}
+            Login to Bankwesen
           </CardTitle>
           <CardDescription className="text-center">
-            {isLogin 
-              ? "Sign in to your account to continue" 
-              : "Enter your details to create a new account"}
+            Sign in to your account to continue
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLogin ? <LoginForm /> : <RegisterForm onToggle={() => setIsLogin(true)} />}
+          <LoginForm />
         </CardContent>
-        <CardFooter className="flex flex-col gap-4">
-          <div className="text-sm text-center text-muted-foreground">
-            {isLogin ? "Don't have an account? " : "Already have an account? "}
-            <Button
-              variant="link"
-              className="p-0 font-semibold cursor-pointer"
-              onClick={() => setIsLogin(!isLogin)}
-            >
-              {isLogin ? "Register" : "Login"}
-            </Button>
-          </div>
-        </CardFooter>
       </Card>
     </div>
   );
@@ -51,6 +40,7 @@ const AuthPage = () => {
 
 const LoginForm = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: "",
     password: "",
@@ -58,9 +48,10 @@ const LoginForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     try {
-      const response = await authApi.login(formData.username, formData.password);
+      const response = await authService.login(formData.username, formData.password);
       
       if (response.status === 200 && response.data) {
         toast.success("Welcome back!");
@@ -70,6 +61,8 @@ const LoginForm = () => {
       }
     } catch (error) {
       toast.error("Login failed. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -113,144 +106,19 @@ const LoginForm = () => {
           required
         />
       </div>
-      <Button type="submit" className="w-full font-bold cursor-pointer">
-        Sign In
-      </Button>
-    </form>
-  );
-};
-
-const RegisterForm = ({ onToggle }: { onToggle: () => void }) => {
-  const [formData, setFormData] = useState({
-    username: "",
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
-  });
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (formData.password !== formData.confirmPassword) {
-      toast.error("Passwords do not match!");
-      return;
-    }
-    
-    // Get existing users
-    const users = JSON.parse(localStorage.getItem("users") || "[]");
-    
-    // Check if username or email already exists
-    if (users.some((u: any) => u.username === formData.username)) {
-      toast.error("Username already registered!");
-      return;
-    }
-    if (users.some((u: any) => u.email === formData.email)) {
-      toast.error("Email already registered!");
-      return;
-    }
-    
-    // Add new user
-    const newUser = {
-      id: Date.now().toString(),
-      username: formData.username,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone,
-      password: formData.password,
-      balance: 0,
-      transactionHistory: [],
-    };
-    
-    users.push(newUser);
-    localStorage.setItem("users", JSON.stringify(users));
-    
-    toast.success("Account created successfully!");
-    onToggle();
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="register-username">Username</Label>
-        <Input
-          id="register-username"
-          type="text"
-          name="username"
-          placeholder="Enter your username"
-          value={formData.username}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="register-name">Full Name</Label>
-        <Input
-          id="register-name"
-          type="text"
-          name="name"
-          placeholder="Enter your full name"
-          value={formData.name}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="register-email">Email</Label>
-        <Input
-          id="register-email"
-          type="email"
-          name="email"
-          placeholder="Enter your email"
-          value={formData.email}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="register-phone">Phone Number</Label>
-        <Input
-          id="register-phone"
-          type="tel"
-          name="phone"
-          placeholder="Enter your phone number"
-          value={formData.phone}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="register-password">Password</Label>
-        <Input
-          id="register-password"
-          type="password"
-          name="password"
-          placeholder="Create a password"
-          value={formData.password}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="register-confirm-password">Confirm Password</Label>
-        <Input
-          id="register-confirm-password"
-          type="password"
-          name="confirmPassword"
-          placeholder="Confirm your password"
-          value={formData.confirmPassword}
-          onChange={handleChange}
-          required
-        />
-      </div>
-      <Button type="submit" className="w-full font-bold cursor-pointer">
-        Create Account
+      <Button 
+        type="submit" 
+        className="w-full font-bold cursor-pointer"
+        disabled={loading}
+      >
+        {loading ? (
+          <span className="flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            Signing in...
+          </span>
+        ) : (
+          "Sign In"
+        )}
       </Button>
     </form>
   );

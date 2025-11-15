@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import * as React from "react";
-import type { SemesterTuition } from "@/lib/mockData";
+import type { SemesterTuition } from "@/config/mockData";
 
 type PaymentSuccessCardProps = {
   transactionId: string;
@@ -10,7 +10,7 @@ type PaymentSuccessCardProps = {
   amount: number;
   createdAt: string;
   semesters: SemesterTuition[];
-  onViewHistory: (args: { transactionId: string; year?: number; semester?: "Semester 1" | "Semester 2" }) => void;
+  onViewHistory: (args: { transactionId: string; year?: string; semester?: "Semester 1" | "Semester 2" }) => void;
   onBackHome: () => void;
 };
 
@@ -24,8 +24,6 @@ export const PaymentSuccessCard: React.FC<PaymentSuccessCardProps> = ({
   onViewHistory,
   onBackHome,
 }) => {
-  const firstSemester = semesters?.[0];
-
   return (
     <Card>
       <CardHeader>

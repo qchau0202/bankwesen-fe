@@ -1,5 +1,3 @@
-// Mock API functions that simulate backend API calls
-
 import { getMockStorage, loadStudentTuitions, saveStudentTuitions } from "./mockData";
 import type {
   User,
@@ -10,59 +8,7 @@ import type {
   SemesterTuition,
 } from "./mockData";
 
-// Simulate JWT token
-const generateJWT = (userId: string): string => {
-  return `mock_jwt_token_${userId}_${Date.now()}`;
-};
-
-// Simulate setting cookie
-const setCookie = (token: string) => {
-  document.cookie = `access_token=${token}; path=/; max-age=3600`;
-};
-
-// 1. Authentication API
-export const authApi = {
-  // POST: /api/auth/login
-  login: async (username: string, password: string): Promise<{ status: number; data?: { user: User; token: string }; error?: string }> => {
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    const users = JSON.parse(localStorage.getItem("users") || "[]");
-    const user = users.find((u: User) => u.username === username && u.password === password);
-
-    if (!user) {
-      return { status: 401, error: "Invalid username or password" };
-    }
-
-    // Remove password from response
-    const { password: _, ...userWithoutPassword } = user;
-    const token = generateJWT(user.id);
-    setCookie(token);
-
-    // Store user in localStorage
-    localStorage.setItem("currentUser", JSON.stringify(user));
-    localStorage.setItem("accessToken", token);
-
-    return {
-      status: 200,
-      data: { user: userWithoutPassword as User, token },
-    };
-  },
-
-  // GET: /api/tuition/{studentID} - Get user info after login
-  getUserInfo: async (): Promise<{ status: number; data?: User; error?: string }> => {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
-    if (!user.id) {
-      return { status: 401, error: "Unauthorized" };
-    }
-
-    return { status: 200, data: user };
-  },
-};
-
-// 2. Tuition Service API
+// 1. Tuition Service API
 export const tuitionApi = {
   // GET: /api/tuition/{studentID}
   getTuitionInfo: async (studentId: string): Promise<{ status: number; data?: Student; error?: string }> => {
@@ -86,7 +32,6 @@ export const tuitionApi = {
     return { status: 200, data: updatedStudent };
   },
 
-  // Check if user has enough balance
   checkBalance: (_userId: string, tuitionAmount: number): { hasEnough: boolean; balance: number } => {
     const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
     const balance = user.balance || 0;
@@ -112,7 +57,7 @@ export const paymentApi = {
     await new Promise((resolve) => setTimeout(resolve, 400));
 
     const user = JSON.parse(localStorage.getItem("currentUser") || "{}");
-    if (!user.id) {
+    if (!user.customerId) {
       return { status: 401, error: "Unauthorized" };
     }
 
@@ -124,7 +69,7 @@ export const paymentApi = {
     const tuitionAmount = outstandingSemesters.reduce((sum, semester) => sum + semester.amount, 0);
 
     // Check balance
-    const balanceCheck = tuitionApi.checkBalance(user.id, tuitionAmount);
+    const balanceCheck = tuitionApi.checkBalance(user.customerId, tuitionAmount);
     if (!balanceCheck.hasEnough) {
       return { status: 400, error: "Insufficient balance" };
     }
@@ -133,7 +78,7 @@ export const paymentApi = {
 
     // Check if payment is already locked/processing
     const existingPayment = storage.payments.find(
-      (p) => p.userId === user.id && p.studentId === studentId && (p.status === "pending" || p.isLocked)
+      (p) => p.userId === user.customerId && p.studentId === studentId && (p.status === "pending" || p.isLocked)
     );
 
     if (existingPayment) {
@@ -142,7 +87,7 @@ export const paymentApi = {
 
     const payment: Payment = {
       id: `payment_${Date.now()}`,
-      userId: user.id,
+      userId: user.customerId,
       studentId,
       studentName,
       tuitionAmount,
@@ -348,7 +293,7 @@ export const transactionApi = {
 
     // Update users array
     const users = JSON.parse(localStorage.getItem("users") || "[]");
-    const userIndex = users.findIndex((u: User) => u.id === user.id);
+    const userIndex = users.findIndex((u: User) => u.customerId === user.customerId);
     if (userIndex !== -1) {
       users[userIndex].balance = user.balance;
       users[userIndex].transactionHistory.push(`transaction_${Date.now()}`);
@@ -359,7 +304,7 @@ export const transactionApi = {
     const transaction: Transaction = {
       id: `transaction_${Date.now()}`,
       paymentId,
-      userId: user.id,
+      customerId: user.customerId,
       studentId: payment.studentId,
       studentName: payment.studentName,
       amount: payment.tuitionAmount,
@@ -392,13 +337,12 @@ export const transactionApi = {
   },
 
   // GET: /api/payment/{paymentID} -> GET: /api/transaction/{transactionID} (for history)
-  getTransactionHistory: async (userId: string): Promise<{ status: number; data?: Transaction[]; error?: string }> => {
+  getTransactionHistory: async (customerId: string): Promise<{ status: number; data?: Transaction[]; error?: string }> => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     const storage = getMockStorage();
-    const userTransactions = storage.getTransactions().filter((t) => t.userId === userId);
+    const customerTransactions = storage.getTransactions().filter((t) => t.customerId === customerId);
 
-    return { status: 200, data: userTransactions };
+    return { status: 200, data: customerTransactions };
   },
 };
-

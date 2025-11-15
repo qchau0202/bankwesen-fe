@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SemesterTuition } from "@/lib/mockData";
+import type { SemesterTuition } from "@/config/mockData";
 
 type PayerDetails = {
   name?: string;

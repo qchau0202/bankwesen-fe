@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
-import { tuitionApi, paymentApi, otpApi, transactionApi } from "@/lib/mockApi";
-import type { Payment, SemesterTuition, Transaction } from "@/lib/mockData";
+import { tuitionApi, paymentApi, otpApi, transactionApi } from "@/config/mockApi";
+import type { Payment, SemesterTuition, Transaction } from "@/config/mockData";
 import OTPVerificationCard from "@/components/tuition/OTPVerificationCard";
 import PayerInfoCard from "@/components/tuition/PayerInfoCard";
 import TuitionInfoCard from "@/components/tuition/TuitionInfoCard";
@@ -41,11 +41,12 @@ const TuitionPaymentPage = () => {
 
   // Check if user is logged in
   useEffect(() => {
-    if (!currentUser.id) {
+    const accessToken = localStorage.getItem("accessToken");
+    if (!currentUser.customerId || !accessToken) {
       toast.error("Please login first");
       navigate("/auth");
     }
-  }, [currentUser.id, navigate]);
+  }, [currentUser.customerId, navigate]);
 
   // Auto-fetch tuition info when student ID changes
   useEffect(() => {
@@ -73,7 +74,7 @@ const TuitionPaymentPage = () => {
           if (totalOutstanding === 0) {
             setBalanceError("This student has no outstanding tuition to pay.");
             } else {
-            const balanceCheck = tuitionApi.checkBalance(currentUser.id, totalOutstanding);
+            const balanceCheck = tuitionApi.checkBalance(currentUser.customerId, totalOutstanding);
             if (!balanceCheck.hasEnough) {
               setBalanceError(`Insufficient balance. Your balance: ${balanceCheck.balance.toLocaleString()} VND, Required: ${totalOutstanding.toLocaleString()} VND`);
             } else {
@@ -109,7 +110,7 @@ const TuitionPaymentPage = () => {
 
     const debounceTimer = setTimeout(fetchTuitionInfo, 500);
     return () => clearTimeout(debounceTimer);
-  }, [formData.studentId, currentUser.id]);
+  }, [formData.studentId, currentUser.customerId]);
 
   // Check OTP expiration and update countdown timer
   useEffect(() => {
@@ -241,19 +242,6 @@ const TuitionPaymentPage = () => {
         if (transactionResponse.status === 201 && transactionResponse.data) {
           toast.success("Transaction completed successfully!");
           setLastTransaction(transactionResponse.data);
-          
-          // Update user balance in localStorage
-          const updatedUser = JSON.parse(localStorage.getItem("currentUser") || "{}");
-          updatedUser.balance -= currentPayment.tuitionAmount;
-          localStorage.setItem("currentUser", JSON.stringify(updatedUser));
-
-          // Update users array
-          const users = JSON.parse(localStorage.getItem("users") || "[]");
-          const userIndex = users.findIndex((u: any) => u.id === updatedUser.id);
-          if (userIndex !== -1) {
-            users[userIndex].balance = updatedUser.balance;
-            localStorage.setItem("users", JSON.stringify(users));
-          }
 
           // Move to success step and let user decide next navigation
           setStep("success");
@@ -317,8 +305,27 @@ const TuitionPaymentPage = () => {
 
   if (step === "otp") {
     return (
-      <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
+      <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted relative">
+        {loading && (
+          <div className="fixed inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-50">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-muted-foreground font-semibold">Processing...</p>
+            </div>
+          </div>
+        )}
         <div className="max-w-2xl mx-auto">
+          <div className="mb-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate("/home")}
+              className="font-bold"
+              disabled={loading}
+            >
+              ← Back to Home
+            </Button>
+          </div>
           <OTPVerificationCard
             email={currentUser.email}
             otpCode={otpCode}
@@ -367,7 +374,7 @@ const TuitionPaymentPage = () => {
               setSelectedSemesterId(null);
               const params = new URLSearchParams();
               params.set("tx", txId);
-              if (year) params.set("y", String(year));
+              if (year) params.set("y", year);
               if (semester) params.set("sem", semester === "Semester 1" ? "1" : "2");
               navigate(`/transaction-history?${params.toString()}`);
             }}
@@ -378,15 +385,33 @@ const TuitionPaymentPage = () => {
   }
 
   return (
-    <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
+    <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted relative">
+      {loading && (
+        <div className="fixed inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-50">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            <p className="text-muted-foreground font-semibold">Processing...</p>
+          </div>
+        </div>
+      )}
       <div className="mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Payment</h1>
+        <Button
+            type="button"
+            variant="outline"
+            onClick={() => navigate("/home")}
+            className="font-bold mb-6"
+            disabled={loading}
+          >
+            ← Back to Home
+          </Button>
+          <h1 className="text-3xl font-bold mb-2">TDTU ibanking Tuition Payment</h1>
+          <p className="text-muted-foreground">Please fill in the following information to continue.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="max-w-full mx-auto">
           <div className="flex flex-col md:flex-row gap-4">
-            <PayerInfoCard payer={{ name: currentUser.name, phone: currentUser.phone, email: currentUser.email }} />
+            <PayerInfoCard payer={{ name: currentUser.full_name, phone: currentUser.phone_number, email: currentUser.email }} />
             <TuitionInfoCard
               formData={formData}
             semesters={studentSemesters}
@@ -424,7 +449,14 @@ const TuitionPaymentPage = () => {
               }
               className="font-bold"
             >
-              {loading ? "Processing..." : "Confirm Transaction"}
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Processing...
+                </span>
+              ) : (
+                "Confirm Transaction"
+              )}
             </Button>
           </div>
         </form>
@@ -436,9 +468,9 @@ const TuitionPaymentPage = () => {
           onCancel={() => setShowConfirmDialog(false)}
           onConfirm={handleConfirmPayment}
           payer={{
-            name: currentUser.name,
+            name: currentUser.full_name,
             email: currentUser.email,
-            phone: currentUser.phone,
+            phone: currentUser.phone_number,
             balance: currentUser.balance,
           }}
           tuition={{

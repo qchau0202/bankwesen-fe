@@ -1,9 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Transaction } from "@/lib/mockData";
+import type { Transaction } from "@/config/mockData";
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
-  selectedYear?: number | null;
+  selectedYear?: string | null;
   selectedSemester?: "Semester 1" | "Semester 2" | null;
 }
 
@@ -57,7 +57,7 @@ const TransactionHistory = ({ transactions, selectedYear = null, selectedSemeste
                 {(selectedYear || selectedSemester) && (
                   <div className="rounded-md bg-muted/50 p-3">
                     <p className="text-sm font-semibold mb-2">
-                      Semester Breakdown {selectedYear ? `(Year ${selectedYear})` : ""} {selectedSemester ? `(${selectedSemester})` : ""}
+                      Semester Breakdown {selectedYear ? `(${selectedYear})` : ""} {selectedSemester ? `(${selectedSemester})` : ""}
                     </p>
                     {(() => {
                       const filtered = (transaction.semesters || []).filter((semester) => {
@@ -106,4 +106,3 @@ const TransactionHistory = ({ transactions, selectedYear = null, selectedSemeste
 };
 
 export default TransactionHistory;
-

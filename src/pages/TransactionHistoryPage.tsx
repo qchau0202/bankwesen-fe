@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { transactionApi } from "@/lib/mockApi";
-import type { Transaction } from "@/lib/mockData";
+import { transactionApi } from "@/config/mockApi";
+import type { Transaction } from "@/config/mockData";
 import TransactionHistory from "@/components/transactions/TransactionHistory";
 
 const TransactionHistoryPage = () => {
@@ -11,20 +11,28 @@ const TransactionHistoryPage = () => {
   const location = useLocation();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedYear, setSelectedYear] = useState<number | "all">("all");
+  const [selectedYear, setSelectedYear] = useState<string | "all">("all");
   const [selectedSemester, setSelectedSemester] = useState<"Semester 1" | "Semester 2" | "all">("all");
   const [targetTx, setTargetTx] = useState<string | null>(null);
   const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}");
 
+  // Check if user is logged in
+  useEffect(() => {
+    const accessToken = localStorage.getItem("accessToken");
+    if (!currentUser.customerId || !accessToken) {
+      navigate("/auth");
+    }
+  }, [currentUser.customerId, navigate]);
+
   useEffect(() => {
     const fetchTransactions = async () => {
-      if (!currentUser.id) {
-        navigate("/auth");
+      const accessToken = localStorage.getItem("accessToken");
+      if (!currentUser.customerId || !accessToken) {
         return;
       }
 
       try {
-        const response = await transactionApi.getTransactionHistory(currentUser.id);
+        const response = await transactionApi.getTransactionHistory(currentUser.customerId);
         if (response.status === 200 && response.data) {
           setTransactions(response.data);
         }
@@ -36,7 +44,7 @@ const TransactionHistoryPage = () => {
     };
 
     fetchTransactions();
-  }, [currentUser.id, navigate]);
+  }, [currentUser.customerId, navigate]);
 
   // Parse query params for tx, y (year), sem (1 or 2)
   useEffect(() => {
@@ -45,9 +53,14 @@ const TransactionHistoryPage = () => {
     const y = params.get("y");
     const sem = params.get("sem");
     if (y) {
+      // y can be a year string like "2023-2024" or a single year number
+      // If it's a number, convert to year format
       const yr = Number(y);
       if (!Number.isNaN(yr)) {
-        setSelectedYear(yr);
+        setSelectedYear(`${yr}-${yr + 1}`);
+      } else {
+        // Already in format "2023-2024"
+        setSelectedYear(y);
       }
     }
     if (sem === "1") setSelectedSemester("Semester 1");
@@ -73,7 +86,12 @@ const TransactionHistoryPage = () => {
     new Set(
       transactions.flatMap((t) => (t.semesters || []).map((s) => s.schoolYear))
     )
-  ).sort((a, b) => a - b);
+  ).sort((a, b) => {
+    // Sort by the first year in the string (e.g., "2023-2024" -> 2023)
+    const yearA = parseInt(a.split("-")[0]);
+    const yearB = parseInt(b.split("-")[0]);
+    return yearA - yearB;
+  });
 
   const filteredTransactions =
     selectedYear === "all" && selectedSemester === "all"
@@ -90,9 +108,10 @@ const TransactionHistoryPage = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
-        <div className="max-w-4xl mx-auto">
-          <p>Loading transaction history...</p>
+      <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground font-semibold">Loading transaction history...</p>
         </div>
       </div>
     );
@@ -102,19 +121,18 @@ const TransactionHistoryPage = () => {
     <div className="min-h-screen p-4 bg-gradient-to-br from-background to-muted">
       <div className="max-w-4xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold mb-2">Transaction History</h1>
+          <Button
+            variant="outline"
+            onClick={() => navigate("/home")}
+            className="font-bold mb-6"
+          >
+            ← Back to Home
+          </Button>
+          <h1 className="text-3xl font-bold mb-2">TDTU ibanking Transaction History</h1>
           <p className="text-muted-foreground">View your past tuition payment transactions</p>
         </div>
 
         <div className="space-y-4">
-          <Button
-            variant="outline"
-            onClick={() => navigate("/home")}
-            className="font-bold"
-          >
-            Back to Home
-          </Button>
-
           <Card>
             <CardContent className="py-4">
               <div className="flex flex-col sm:flex-row gap-3">
@@ -127,7 +145,7 @@ const TransactionHistoryPage = () => {
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     value={selectedYear}
                     onChange={(e) =>
-                      setSelectedYear(e.target.value === "all" ? "all" : Number(e.target.value))
+                      setSelectedYear(e.target.value === "all" ? "all" : e.target.value)
                     }
                   >
                     <option value="all">All years</option>
