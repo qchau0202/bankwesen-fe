@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
-import { tuitionApi, paymentApi, otpApi, transactionApi } from "@/config/mockApi";
+import { tuitionService } from "@/services/tuitionService";
+import { paymentService } from "@/services/paymentService";
 import type { Payment, SemesterTuition, Transaction } from "@/config/mockData";
 import OTPVerificationCard from "@/components/tuition/OTPVerificationCard";
 import PayerInfoCard from "@/components/tuition/PayerInfoCard";
@@ -53,7 +54,7 @@ const TuitionPaymentPage = () => {
     const fetchTuitionInfo = async () => {
       if (formData.studentId && formData.studentId.length >= 3) {
         try {
-          const response = await tuitionApi.getTuitionInfo(formData.studentId);
+          const response = await tuitionService.getTuitionInfo(formData.studentId);
           
           if (response.status === 200 && response.data) {
           const semesters = response.data.semesters || [];
@@ -74,7 +75,7 @@ const TuitionPaymentPage = () => {
           if (totalOutstanding === 0) {
             setBalanceError("This student has no outstanding tuition to pay.");
             } else {
-            const balanceCheck = tuitionApi.checkBalance(currentUser.customerId, totalOutstanding);
+            const balanceCheck = tuitionService.checkBalance(currentUser.customerId, totalOutstanding);
             if (!balanceCheck.hasEnough) {
               setBalanceError(`Insufficient balance. Your balance: ${balanceCheck.balance.toLocaleString()} VND, Required: ${totalOutstanding.toLocaleString()} VND`);
             } else {
@@ -164,33 +165,58 @@ const TuitionPaymentPage = () => {
   };
 
   const handleConfirmPayment = async () => {
+    // Prevent double submission
+    if (loading) {
+      return;
+    }
+
     setShowConfirmDialog(false);
     setLoading(true);
 
     try {
+      // Get selected semesters (outstanding ones)
+      const outstandingSemesters = studentSemesters.filter((semester) => semester.status !== "paid");
+      
+      // If a specific semester is selected, only pay that one; otherwise pay all outstanding
+      const semestersToPay = selectedSemesterId
+        ? outstandingSemesters.filter((sem) => sem.id === selectedSemesterId)
+        : outstandingSemesters;
+
+      if (semestersToPay.length === 0) {
+        toast.error("No outstanding tuition selected for payment");
+        setLoading(false);
+        return;
+      }
+
+      // Map semester IDs to tuitionIds (semester.id should be the tuitionId)
+      const tuitionIds = semestersToPay.map((sem) => sem.id);
+
       // Create payment
-      const paymentResponse = await paymentApi.createPayment({
-        studentId: formData.studentId,
-        studentName: formData.studentName,
-        semesters: studentSemesters,
-      });
+      const paymentResponse = await paymentService.createPayment(tuitionIds, formData.studentId);
 
       if (paymentResponse.status === 201 && paymentResponse.data) {
-        setCurrentPayment(paymentResponse.data);
-        
-        // Request OTP
-        const otpResponse = await otpApi.requestOTP(paymentResponse.data.id);
-        
-        if (otpResponse.status === 200 && otpResponse.data) {
-          setOtpExpiresAt(otpResponse.data.expiresAt);
-          setCanResend(false);
-          setStep("otp");
-          toast.success(`OTP sent to your email: ${otpResponse.data.otp}`, {
-            duration: 10000, // Show for 10 seconds
-          });
-        } else {
-          toast.error(otpResponse.error || "Failed to send OTP");
-        }
+        // Map backend response to frontend Payment format
+        const payment: Payment = {
+          id: paymentResponse.data.paymentId,
+          userId: paymentResponse.data.customerId,
+          studentId: formData.studentId,
+          studentName: formData.studentName,
+          tuitionAmount: paymentResponse.data.amount,
+          status: paymentResponse.data.status === "completed" ? "completed" : paymentResponse.data.status === "cancelled" ? "cancelled" : paymentResponse.data.status === "failed" ? "failed" : "pending",
+          createdAt: paymentResponse.data.created_at,
+          otpAttempts: paymentResponse.data.otp_attempts,
+          isLocked: paymentResponse.data.is_locked,
+          semesters: semestersToPay,
+        };
+        setCurrentPayment(payment);
+        const otpResponse = await paymentService.requestOTP(payment.id);
+        setOtpExpiresAt(otpResponse.data?.expiresAt || 0);
+        setOtpAttempts(0);
+        setCanResend(false);
+        setStep("otp");
+        toast.success("OTP sent to your email. Please check your inbox.", {
+          duration: 10000, // Show for 10 seconds
+        });
       } else {
         toast.error(paymentResponse.error || "Failed to create payment");
       }
@@ -206,13 +232,14 @@ const TuitionPaymentPage = () => {
 
     setLoading(true);
     try {
-      const response = await otpApi.resendOTP(currentPayment.id);
+      // Request OTP again (same endpoint as initial request)
+      const response = await paymentService.requestOTP(currentPayment.id);
       
       if (response.status === 200 && response.data) {
         setOtpExpiresAt(response.data.expiresAt);
-        setCanResend(false);
         setOtpAttempts(0);
-        toast.success(`New OTP sent to your email: ${response.data.otp}`, {
+        setCanResend(false);
+        toast.success("New OTP sent to your email. Please check your inbox.", {
           duration: 10000, // Show for 10 seconds
         });
       } else {
@@ -231,23 +258,43 @@ const TuitionPaymentPage = () => {
       return;
     }
 
+    // Prevent double submission
+    if (loading) {
+      return;
+    }
+
     setLoading(true);
     try {
-      const response = await otpApi.verifyOTP(currentPayment.id, otpCode);
+      // Verify OTP - payment completes here (no separate transaction step)
+      const response = await paymentService.verifyOTP(
+        currentPayment.id,
+        otpCode,
+        formData.studentId,
+        formData.studentName,
+        studentSemesters
+      );
 
-      if (response.status === 200 && response.data?.success) {
-        // OTP verified, create transaction
-        const transactionResponse = await transactionApi.createTransaction(currentPayment.id);
+      if (response.status === 200 && response.data) {
+        // Payment completed successfully
+        toast.success("Payment completed successfully!");
+        
+        // Map payment to transaction format for success page
+        const transaction: Transaction = {
+          id: response.data.id,
+          paymentId: response.data.id,
+          customerId: response.data.userId,
+          studentId: response.data.studentId,
+          studentName: response.data.studentName,
+          amount: response.data.tuitionAmount,
+          status: "success",
+          createdAt: response.data.createdAt,
+          semesters: response.data.semesters,
+        };
+        setLastTransaction(transaction);
+        setCurrentPayment(response.data);
 
-        if (transactionResponse.status === 201 && transactionResponse.data) {
-          toast.success("Transaction completed successfully!");
-          setLastTransaction(transactionResponse.data);
-
-          // Move to success step and let user decide next navigation
-          setStep("success");
-        } else {
-          toast.error(transactionResponse.error || "Transaction failed");
-        }
+        // Move to success step and let user decide next navigation
+        setStep("success");
       } else {
         // Handle OTP errors
         if (response.error === "OTP_EXPIRED") {
@@ -255,7 +302,7 @@ const TuitionPaymentPage = () => {
           toast.error("OTP has expired. Please request a new one.");
         } else if (response.error === "MAX_ATTEMPTS_REACHED") {
           // Cancel payment
-          await paymentApi.cancelPayment(currentPayment.id);
+          await paymentService.cancelPayment(currentPayment.id);
           toast.error("Maximum OTP attempts reached. Payment cancelled.");
           setStep("form");
           setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
@@ -285,15 +332,19 @@ const TuitionPaymentPage = () => {
 
     setLoading(true);
     try {
-      await paymentApi.cancelPayment(currentPayment.id);
-      toast.success("Payment cancelled");
-      setStep("form");
-      setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
-      setCurrentPayment(null);
-      setOtpCode("");
-      setOtpAttempts(0);
-      setStudentSemesters([]);
-      setSelectedSemesterId(null);
+      const response = await paymentService.cancelPayment(currentPayment.id);
+      if (response.status === 200) {
+        toast.success("Payment cancelled");
+        setStep("form");
+        setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
+        setCurrentPayment(null);
+        setOtpCode("");
+        setOtpAttempts(0);
+        setStudentSemesters([]);
+        setSelectedSemesterId(null);
+      } else {
+        toast.error(response.error || "Failed to cancel payment");
+      }
     } catch (error) {
       toast.error("Failed to cancel payment");
     } finally {

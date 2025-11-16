@@ -12,7 +12,7 @@ export const authService = {
   // Backend route: router = APIRouter(prefix="/api/v1/auth")
   login: async (username: string, password: string): Promise<{ status: number; data?: { user: User; token: string }; error?: string }> => {
     try {
-      const url = `${API_CONFIG.AUTH_SERVICE_URL}/api/v1/auth/login`;
+      const url = `${API_CONFIG.AUTH_SERVICE_URL}/api/auth/login`;
       const requestBody = JSON.stringify({ username, password });
       
       // Build headers as plain object - use literal header name to ensure it's set correctly
@@ -109,7 +109,7 @@ export const authService = {
         return { status: 401, error: "Unauthorized" };
       }
 
-      const url = `${API_CONFIG.AUTH_SERVICE_URL}/api/v1/auth/me`;
+      const url = `${API_CONFIG.AUTH_SERVICE_URL}/api/auth/me`;
       
       // Build headers as plain object
       const headers: { [key: string]: string } = {
