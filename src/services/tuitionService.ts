@@ -1,5 +1,6 @@
 import { API_CONFIG } from "@/config/apiConfig";
 import type { Student, SemesterTuition } from "@/config/mockData";
+import { getTokenOrRedirect, handleUnauthorized } from "@/services/sessionUtils";
 
 // Backend response types
 interface TuitionResponse {
@@ -65,7 +66,7 @@ export const tuitionService = {
   // GET: /api/tuition/{studentId}
   getTuitionInfo: async (studentId: string): Promise<{ status: number; data?: Student; error?: string }> => {
     try {
-      const token = localStorage.getItem("accessToken");
+      const token = getTokenOrRedirect();
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -84,6 +85,11 @@ export const tuitionService = {
       });
 
       // Handle network errors and non-JSON responses
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
+
       let responseData;
       const contentType = response.headers.get("content-type");
       

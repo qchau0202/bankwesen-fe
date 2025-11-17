@@ -209,12 +209,14 @@ const TuitionPaymentPage = () => {
           semesters: semestersToPay,
         };
         setCurrentPayment(payment);
-        const otpResponse = await paymentService.requestOTP(payment.id);
-        setOtpExpiresAt(otpResponse.data?.expiresAt || 0);
+        // OTP is automatically sent by backend when payment is created
+        // Set expiration time to 60 seconds from now (default OTP expiration)
+        //! TODO: Get OTP expiration time from backend
+        setOtpExpiresAt(Date.now() + 60 * 1000);
         setOtpAttempts(0);
         setCanResend(false);
         setStep("otp");
-        toast.success("OTP sent to your email. Please check your inbox.", {
+        toast.success("Payment created. OTP sent to your email. Please check your inbox.", {
           duration: 10000, // Show for 10 seconds
         });
       } else {
@@ -228,28 +230,9 @@ const TuitionPaymentPage = () => {
   };
 
   const handleResendOTP = async () => {
-    if (!currentPayment) return;
-
-    setLoading(true);
-    try {
-      // Request OTP again (same endpoint as initial request)
-      const response = await paymentService.requestOTP(currentPayment.id);
-      
-      if (response.status === 200 && response.data) {
-        setOtpExpiresAt(response.data.expiresAt);
-        setOtpAttempts(0);
-        setCanResend(false);
-        toast.success("New OTP sent to your email. Please check your inbox.", {
-          duration: 10000, // Show for 10 seconds
-        });
-      } else {
-        toast.error(response.error || "Failed to resend OTP");
-      }
-    } catch (error) {
-      toast.error("Failed to resend OTP");
-    } finally {
-      setLoading(false);
-    }
+    // OTP resend functionality removed - OTP is automatically sent when payment is created
+    // If OTP expires, user needs to cancel and create a new payment
+    toast.error("OTP resend is not available. Please cancel and create a new payment if OTP has expired.");
   };
 
   const handleVerifyOTP = async () => {

@@ -1,5 +1,6 @@
 import type { User } from "@/config/mockData";
 import { API_CONFIG } from "@/config/apiConfig";
+import { handleUnauthorized } from "@/services/sessionUtils";
 
 // Set cookie helper
 const setCookie = (token: string) => {
@@ -106,6 +107,7 @@ export const authService = {
     try {
       const token = localStorage.getItem("accessToken");
       if (!token) {
+        handleUnauthorized();
         return { status: 401, error: "Unauthorized" };
       }
 
@@ -128,8 +130,7 @@ export const authService = {
         if (response.ok) {
           return { status: 200, data: user };
         } else {
-          localStorage.removeItem("currentUser");
-          localStorage.removeItem("accessToken");
+          handleUnauthorized();
           return { status: 401, error: "Unauthorized - Token expired" };
         }
       }
@@ -141,6 +142,9 @@ export const authService = {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          handleUnauthorized();
+        }
         return { status: response.status, error: "Unauthorized" };
       }
 

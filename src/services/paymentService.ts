@@ -1,5 +1,6 @@
 import { API_CONFIG } from "@/config/apiConfig";
 import type { Payment, SemesterTuition } from "@/config/mockData";
+import { getTokenOrRedirect, handleUnauthorized } from "@/services/sessionUtils";
 
 // Backend response types
 interface PaymentResponse {
@@ -15,24 +16,10 @@ interface PaymentResponse {
   expired_at?: string;
 }
 
-interface OTPRequestResponse {
-  success: boolean;
-  message: string;
-  payment_id: string;
-  expires_in: number;
-  attempts_remaining: number;
-}
-
 interface OTPVerifyResponse {
   success: boolean;
   message: string;
   payment?: PaymentResponse;
-}
-
-interface PaymentCancelResponse {
-  success: boolean;
-  message: string;
-  payment_id: string;
 }
 
 // Map backend PaymentResponse to frontend Payment format
@@ -55,6 +42,28 @@ const mapToPayment = (response: PaymentResponse, studentId: string, studentName:
   };
 };
 
+const updateCurrentUserBalance = (amountPaid: number) => {
+  if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+    return;
+  }
+
+  try {
+    const storedUser = localStorage.getItem("currentUser");
+    if (!storedUser) {
+      return;
+    }
+
+    const parsedUser = JSON.parse(storedUser);
+    const currentBalance = typeof parsedUser.balance === "number" ? parsedUser.balance : 0;
+    const updatedBalance = Math.max(0, currentBalance - amountPaid);
+
+    parsedUser.balance = updatedBalance;
+    localStorage.setItem("currentUser", JSON.stringify(parsedUser));
+  } catch (error) {
+    console.error("Failed to update local user balance:", error);
+  }
+};
+
 // Payment Service
 export const paymentService = {
   // POST: /api/payment/
@@ -63,7 +72,7 @@ export const paymentService = {
     studentId?: string
   ): Promise<{ status: number; data?: PaymentResponse; error?: string }> => {
     try {
-      const token = localStorage.getItem("accessToken");
+      const token = getTokenOrRedirect();
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -90,6 +99,11 @@ export const paymentService = {
       });
 
       // Handle network errors and non-JSON responses
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
+
       let responseData;
       const contentType = response.headers.get("content-type");
       
@@ -129,75 +143,6 @@ export const paymentService = {
     }
   },
 
-  // POST: /api/payment/{paymentID}/otp
-  requestOTP: async (paymentId: string): Promise<{ status: number; data?: { expiresAt: number; attempts_remaining: number }; error?: string }> => {
-    try {
-      const token = localStorage.getItem("accessToken");
-      if (!token) {
-        return { status: 401, error: "Unauthorized - Please login first" };
-      }
-
-      const url = `${API_CONFIG.PAYMENT_SERVICE_URL}/api/payment/${paymentId}/otp`;
-      
-      const headers: { [key: string]: string } = {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
-        "X-API-Key": API_CONFIG.API_KEY,
-      };
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: headers,
-      });
-
-      let responseData;
-      const contentType = response.headers.get("content-type");
-      
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        return {
-          status: response.status || 500,
-          error: text || `Failed to connect to payment service. Status: ${response.status}`,
-        };
-      }
-
-      try {
-        responseData = await response.json();
-      } catch (jsonError) {
-        return {
-          status: response.status || 500,
-          error: `Failed to parse response from payment service.`,
-        };
-      }
-
-      if (!response.ok) {
-        const errorMessage = responseData.detail || responseData.message || "Failed to request OTP";
-        return { status: response.status, error: errorMessage };
-      }
-
-      // Success response: OTPRequestResponse
-      // Note: OTP code is NOT returned (sent via email)
-      // expires_in is in seconds, convert to timestamp
-      const expiresAt = Date.now() + (responseData.expires_in * 1000);
-      return {
-        status: 200,
-        data: {
-          expiresAt,
-          attempts_remaining: responseData.attempts_remaining,
-        },
-      };
-    } catch (error) {
-      console.error("Request OTP error:", error);
-      const errorMessage = error instanceof TypeError && error.message.includes('fetch')
-        ? `Cannot connect to payment service at ${API_CONFIG.PAYMENT_SERVICE_URL}.`
-        : error instanceof Error ? error.message : "Failed to request OTP";
-      return {
-        status: 500,
-        error: errorMessage,
-      };
-    }
-  },
-
   // POST: /api/payment/{paymentID}/verify-otp
   verifyOTP: async (
     paymentId: string,
@@ -207,7 +152,7 @@ export const paymentService = {
     semesters: SemesterTuition[]
   ): Promise<{ status: number; data?: Payment; error?: string }> => {
     try {
-      const token = localStorage.getItem("accessToken");
+      const token = getTokenOrRedirect();
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -229,6 +174,11 @@ export const paymentService = {
         headers: headers,
         body: JSON.stringify(requestBody),
       });
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
 
       let responseData: OTPVerifyResponse;
       const contentType = response.headers.get("content-type");
@@ -267,6 +217,7 @@ export const paymentService = {
       // Success response: OTPVerifyResponse with payment
       if (responseData.success && responseData.payment) {
         const payment = mapToPayment(responseData.payment, studentId, studentName, semesters);
+        updateCurrentUserBalance(payment.tuitionAmount);
         return { status: 200, data: payment };
       }
 
@@ -286,7 +237,7 @@ export const paymentService = {
   // POST: /api/payment/{paymentID}/cancel
   cancelPayment: async (paymentId: string): Promise<{ status: number; error?: string }> => {
     try {
-      const token = localStorage.getItem("accessToken");
+      const token = getTokenOrRedirect();
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -303,6 +254,11 @@ export const paymentService = {
         method: "POST",
         headers: headers,
       });
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
 
       let responseData;
       const contentType = response.headers.get("content-type");
@@ -345,7 +301,7 @@ export const paymentService = {
   // GET: /api/payment/{paymentID}
   getPayment: async (paymentId: string): Promise<{ status: number; data?: PaymentResponse; error?: string }> => {
     try {
-      const token = localStorage.getItem("accessToken");
+      const token = getTokenOrRedirect();
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -362,6 +318,11 @@ export const paymentService = {
         method: "GET",
         headers: headers,
       });
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
 
       let responseData;
       const contentType = response.headers.get("content-type");
