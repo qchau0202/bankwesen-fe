@@ -1,7 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import * as React from "react";
-import type { SemesterTuition } from "@/config/mockData";
+import type { SemesterTuition } from "@/types";
 
 type PaymentSuccessCardProps = {
   transactionId: string;

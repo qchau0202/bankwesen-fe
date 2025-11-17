@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import * as React from "react";
-import type { SemesterTuition } from "@/config/mockData";
+import type { SemesterTuition } from "@/types";
 
 type TuitionFormData = {
   studentId: string;

@@ -1,16 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
 import { tuitionService } from "@/services/tuitionService";
 import { paymentService } from "@/services/paymentService";
-import type { Payment, SemesterTuition, Transaction } from "@/config/mockData";
+import type { Payment, SemesterTuition, Transaction } from "@/types";
 import OTPVerificationCard from "@/components/tuition/OTPVerificationCard";
 import PayerInfoCard from "@/components/tuition/PayerInfoCard";
 import TuitionInfoCard from "@/components/tuition/TuitionInfoCard";
 import PaymentInfoCard from "@/components/tuition/PaymentInfoCard";
 import TuitionConfirmationDialog from "@/components/tuition/TuitionConfirmationDialog";
 import PaymentSuccessCard from "@/components/tuition/PaymentSuccessCard";
+
+const MAX_OTP_ATTEMPTS = 3;
 
 const TuitionPaymentPage = () => {
   const navigate = useNavigate();
@@ -34,11 +36,61 @@ const TuitionPaymentPage = () => {
   const [otpCode, setOtpCode] = useState("");
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [otpAttempts, setOtpAttempts] = useState(0);
-  const [canResend, setCanResend] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
+  const currentPaymentRef = useRef<Payment | null>(null);
+  const stepRef = useRef(step);
+  const otpTimeoutHandledRef = useRef(false);
+
+  const resetPaymentState = useCallback(() => {
+    setStep("form");
+    setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
+    setCurrentPayment(null);
+    setOtpCode("");
+    setOtpAttempts(0);
+    setStudentSemesters([]);
+    setSelectedSemesterId(null);
+    setOtpExpiresAt(null);
+    setTimeLeft(0);
+    otpTimeoutHandledRef.current = false;
+  }, []);
+
+  const handlePaymentTermination = useCallback(
+    async (message?: string) => {
+      if (currentPaymentRef.current) {
+        try {
+          await paymentService.cancelPayment(currentPaymentRef.current.id);
+        } catch (error) {
+          console.error("Failed to cancel payment:", error);
+        }
+      }
+      resetPaymentState();
+      if (message) {
+        toast.error(message);
+      }
+    },
+    [resetPaymentState]
+  );
+
+  useEffect(() => {
+    currentPaymentRef.current = currentPayment;
+  }, [currentPayment]);
+
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
+
+  useEffect(() => {
+    return () => {
+      if (stepRef.current === "otp" && currentPaymentRef.current) {
+        paymentService.cancelPayment(currentPaymentRef.current.id).catch((error) => {
+          console.error("Failed to cancel payment on navigation:", error);
+        });
+      }
+    };
+  }, []);
 
   // Check if user is logged in
   useEffect(() => {
@@ -92,7 +144,7 @@ const TuitionPaymentPage = () => {
           setSelectedSemesterId(null);
             setBalanceError(response.error || "Student not found");
           }
-        } catch (error) {
+        } catch (_error) {
           setBalanceError("Failed to fetch tuition information");
         setStudentSemesters([]);
         setSelectedSemesterId(null);
@@ -115,27 +167,30 @@ const TuitionPaymentPage = () => {
 
   // Check OTP expiration and update countdown timer
   useEffect(() => {
-    if (otpExpiresAt) {
+    otpTimeoutHandledRef.current = false;
+  }, [otpExpiresAt]);
+
+  useEffect(() => {
+    if (otpExpiresAt && step === "otp") {
       const updateTimer = () => {
         const remaining = Math.max(0, Math.floor((otpExpiresAt - Date.now()) / 1000));
         setTimeLeft(remaining);
-        
-        if (remaining === 0) {
-          setCanResend(true);
+
+        if (remaining === 0 && !otpTimeoutHandledRef.current) {
+          otpTimeoutHandledRef.current = true;
+          handlePaymentTermination("OTP expired. Payment cancelled.").catch((error) =>
+            console.error("Failed to handle OTP expiration:", error)
+          );
         }
       };
 
-      // Update immediately
       updateTimer();
-
-      // Update every second
       const interval = setInterval(updateTimer, 1000);
-
       return () => clearInterval(interval);
     } else {
       setTimeLeft(0);
     }
-  }, [otpExpiresAt]);
+  }, [otpExpiresAt, step, handlePaymentTermination]);
 
   // input changes are handled inside components via prop callbacks
 
@@ -204,17 +259,17 @@ const TuitionPaymentPage = () => {
           tuitionAmount: paymentResponse.data.amount,
           status: paymentResponse.data.status === "completed" ? "completed" : paymentResponse.data.status === "cancelled" ? "cancelled" : paymentResponse.data.status === "failed" ? "failed" : "pending",
           createdAt: paymentResponse.data.created_at,
-          otpAttempts: paymentResponse.data.otp_attempts,
+          otpAttempts: 0,
           isLocked: paymentResponse.data.is_locked,
           semesters: semestersToPay,
         };
         setCurrentPayment(payment);
         // OTP is automatically sent by backend when payment is created
-        // Set expiration time to 60 seconds from now (default OTP expiration)
-        //! TODO: Get OTP expiration time from backend
-        setOtpExpiresAt(Date.now() + 60 * 1000);
+        // Use backend-provided expiration (fallback to 60s)
+        const expiresInSeconds = paymentResponse.data.otp_expires_in;
+        setOtpExpiresAt(Date.now() + (expiresInSeconds || 60) * 1000);
         setOtpAttempts(0);
-        setCanResend(false);
+        otpTimeoutHandledRef.current = false;
         setStep("otp");
         toast.success("Payment created. OTP sent to your email. Please check your inbox.", {
           duration: 10000, // Show for 10 seconds
@@ -222,17 +277,11 @@ const TuitionPaymentPage = () => {
       } else {
         toast.error(paymentResponse.error || "Failed to create payment");
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error("An error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleResendOTP = async () => {
-    // OTP resend functionality removed - OTP is automatically sent when payment is created
-    // If OTP expires, user needs to cancel and create a new payment
-    toast.error("OTP resend is not available. Please cancel and create a new payment if OTP has expired.");
   };
 
   const handleVerifyOTP = async () => {
@@ -281,26 +330,19 @@ const TuitionPaymentPage = () => {
       } else {
         // Handle OTP errors
         if (response.error === "OTP_EXPIRED") {
-          setCanResend(true);
-          toast.error("OTP has expired. Please request a new one.");
+          await handlePaymentTermination("OTP has expired. Payment cancelled.");
         } else if (response.error === "MAX_ATTEMPTS_REACHED") {
-          // Cancel payment
-          await paymentService.cancelPayment(currentPayment.id);
-          toast.error("Maximum OTP attempts reached. Payment cancelled.");
-          setStep("form");
-          setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
-          setCurrentPayment(null);
-          setOtpCode("");
-          setOtpAttempts(0);
-          setStudentSemesters([]);
-          setSelectedSemesterId(null);
+          await handlePaymentTermination("Maximum OTP attempts reached. Payment cancelled.");
         } else {
           const attempts = otpAttempts + 1;
           setOtpAttempts(attempts);
           toast.error(response.error || "Invalid OTP code");
+          if (attempts >= MAX_OTP_ATTEMPTS) {
+            await handlePaymentTermination("Maximum OTP attempts reached. Payment cancelled.");
+          }
         }
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error("Verification failed. Please try again.");
     } finally {
       setLoading(false);
@@ -309,7 +351,7 @@ const TuitionPaymentPage = () => {
 
   const handleCancelPayment = async () => {
     if (!currentPayment) {
-      setStep("form");
+      resetPaymentState();
       return;
     }
 
@@ -318,21 +360,22 @@ const TuitionPaymentPage = () => {
       const response = await paymentService.cancelPayment(currentPayment.id);
       if (response.status === 200) {
         toast.success("Payment cancelled");
-        setStep("form");
-        setFormData({ studentId: "", studentName: "", tuitionAmount: "" });
-        setCurrentPayment(null);
-        setOtpCode("");
-        setOtpAttempts(0);
-        setStudentSemesters([]);
-        setSelectedSemesterId(null);
+        resetPaymentState();
       } else {
         toast.error(response.error || "Failed to cancel payment");
       }
-    } catch (error) {
+    } catch (_error) {
       toast.error("Failed to cancel payment");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleNavigateHome = async () => {
+    if (step === "otp" && currentPayment) {
+      await handleCancelPayment();
+    }
+    navigate("/home");
   };
 
   const hasOutstandingSemesters = studentSemesters.some((semester) => semester.status !== "paid");
@@ -353,7 +396,7 @@ const TuitionPaymentPage = () => {
             <Button
               type="button"
               variant="outline"
-              onClick={() => navigate("/home")}
+              onClick={handleNavigateHome}
               className="font-bold"
               disabled={loading}
             >
@@ -365,11 +408,9 @@ const TuitionPaymentPage = () => {
             otpCode={otpCode}
             setOtpCode={setOtpCode}
             timeLeft={timeLeft}
-            canResend={canResend}
             otpAttempts={otpAttempts}
             loading={loading}
             onCancel={handleCancelPayment}
-            onResend={handleResendOTP}
             onVerify={handleVerifyOTP}
           />
         </div>

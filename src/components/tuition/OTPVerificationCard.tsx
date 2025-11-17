@@ -9,11 +9,9 @@ type OTPVerificationCardProps = {
   otpCode: string;
   setOtpCode: (code: string) => void;
   timeLeft: number;
-  canResend: boolean;
   otpAttempts: number;
   loading: boolean;
   onCancel: () => void;
-  onResend: () => void;
   onVerify: () => void;
 };
 
@@ -22,11 +20,9 @@ export const OTPVerificationCard: React.FC<OTPVerificationCardProps> = ({
   otpCode,
   setOtpCode,
   timeLeft,
-  canResend,
   otpAttempts,
   loading,
   onCancel,
-  onResend,
   onVerify,
 }) => {
   const isExpired = timeLeft === 0;
@@ -75,16 +71,6 @@ export const OTPVerificationCard: React.FC<OTPVerificationCardProps> = ({
             >
               Cancel
             </Button>
-            {(canResend || isExpired) && (
-              <Button
-                type="button"
-                onClick={onResend}
-                disabled={loading}
-                className="font-bold"
-              >
-                Resend OTP
-              </Button>
-            )}
             <Button
               type="button"
               onClick={onVerify}

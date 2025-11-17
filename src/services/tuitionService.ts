@@ -1,5 +1,5 @@
 import { API_CONFIG } from "@/config/apiConfig";
-import type { Student, SemesterTuition } from "@/config/mockData";
+import type { Student, SemesterTuition } from "@/types";
 import { getTokenOrRedirect, handleUnauthorized } from "@/services/sessionUtils";
 
 // Backend response types

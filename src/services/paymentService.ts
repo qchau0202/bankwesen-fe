@@ -1,5 +1,5 @@
 import { API_CONFIG } from "@/config/apiConfig";
-import type { Payment, SemesterTuition } from "@/config/mockData";
+import type { Payment, SemesterTuition } from "@/types";
 import { getTokenOrRedirect, handleUnauthorized } from "@/services/sessionUtils";
 
 // Backend response types
@@ -10,16 +10,39 @@ interface PaymentResponse {
   idempotency_key: string;
   amount: number;
   status: string;
-  otp_attempts: number;
   is_locked: boolean;
   created_at: string;
   expired_at?: string;
+  otp_expires_in?: number;
 }
 
 interface OTPVerifyResponse {
   success: boolean;
   message: string;
   payment?: PaymentResponse;
+}
+
+export interface TuitionDetail {
+  tuitionId: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  semester: string;
+  academic_year: string;
+  tuition_amount: number;
+  status: string;
+  created_at: string;
+}
+
+export interface PaymentHistoryRecord {
+  payment: PaymentResponse;
+  tuitions: TuitionDetail[];
+}
+
+export interface PaymentHistoryResponse {
+  customerId: string;
+  total_payments: number;
+  payments: PaymentHistoryRecord[];
 }
 
 // Map backend PaymentResponse to frontend Payment format
@@ -36,7 +59,7 @@ const mapToPayment = (response: PaymentResponse, studentId: string, studentName:
     tuitionAmount,
     status: response.status === "completed" ? "completed" : response.status === "cancelled" ? "cancelled" : response.status === "failed" ? "failed" : "pending",
     createdAt: response.created_at,
-    otpAttempts: response.otp_attempts,
+    otpAttempts: 0,
     isLocked: response.is_locked,
     semesters: paidSemesters,
   };
@@ -117,7 +140,7 @@ export const paymentService = {
 
       try {
         responseData = await response.json();
-      } catch (jsonError) {
+      } catch {
         return {
           status: response.status || 500,
           error: `Failed to parse response from payment service. Please ensure the service is running on ${API_CONFIG.PAYMENT_SERVICE_URL}`,
@@ -193,7 +216,7 @@ export const paymentService = {
 
       try {
         responseData = await response.json();
-      } catch (jsonError) {
+      } catch {
         return {
           status: response.status || 500,
           error: `Failed to parse response from payment service.`,
@@ -273,7 +296,7 @@ export const paymentService = {
 
       try {
         responseData = await response.json();
-      } catch (jsonError) {
+      } catch {
         return {
           status: response.status || 500,
           error: `Failed to parse response from payment service.`,
@@ -337,7 +360,7 @@ export const paymentService = {
 
       try {
         responseData = await response.json();
-      } catch (jsonError) {
+      } catch {
         return {
           status: response.status || 500,
           error: `Failed to parse response from payment service.`,
@@ -355,6 +378,79 @@ export const paymentService = {
       const errorMessage = error instanceof TypeError && error.message.includes('fetch')
         ? `Cannot connect to payment service at ${API_CONFIG.PAYMENT_SERVICE_URL}.`
         : error instanceof Error ? error.message : "Failed to get payment";
+      return {
+        status: 500,
+        error: errorMessage,
+      };
+    }
+  },
+
+  // GET: /api/payment/record
+  getPaymentHistory: async (): Promise<{
+    status: number;
+    data?: PaymentHistoryResponse;
+    error?: string;
+  }> => {
+    try {
+      const token = getTokenOrRedirect();
+      if (!token) {
+        return { status: 401, error: "Unauthorized - Please login first" };
+      }
+
+      const url = `${API_CONFIG.PAYMENT_SERVICE_URL}/api/payment/record`;
+
+      const headers: { [key: string]: string } = {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "X-API-Key": API_CONFIG.API_KEY,
+      };
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers,
+      });
+
+      if (response.status === 401) {
+        handleUnauthorized();
+        return { status: 401, error: "Session expired. Please login again." };
+      }
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const text = await response.text();
+        return {
+          status: response.status || 500,
+          error: text || `Failed to connect to payment service. Status: ${response.status}`,
+        };
+      }
+
+      let responseData: PaymentHistoryResponse;
+      try {
+        responseData = await response.json();
+      } catch {
+        return {
+          status: response.status || 500,
+          error: "Failed to parse response from payment service.",
+        };
+      }
+
+      if (!response.ok) {
+        const errorMessage =
+          (responseData as unknown as { detail?: string; message?: string })?.detail ||
+          (responseData as unknown as { detail?: string; message?: string })?.message ||
+          "Failed to fetch payment history";
+        return { status: response.status, error: errorMessage };
+      }
+
+      return { status: 200, data: responseData };
+    } catch (error) {
+      console.error("Get payment history error:", error);
+      const errorMessage =
+        error instanceof TypeError && error.message.includes("fetch")
+          ? `Cannot connect to payment service at ${API_CONFIG.PAYMENT_SERVICE_URL}.`
+          : error instanceof Error
+            ? error.message
+            : "Failed to fetch payment history";
       return {
         status: 500,
         error: errorMessage,

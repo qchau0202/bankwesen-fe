@@ -1,4 +1,4 @@
-import type { User } from "@/config/mockData";
+import type { User } from "@/types";
 import { API_CONFIG } from "@/config/apiConfig";
 import { handleUnauthorized } from "@/services/sessionUtils";
 

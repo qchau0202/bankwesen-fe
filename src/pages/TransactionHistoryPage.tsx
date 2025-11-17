@@ -2,18 +2,20 @@ import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { transactionApi } from "@/config/mockApi";
-import type { Transaction } from "@/config/mockData";
 import TransactionHistory from "@/components/transactions/TransactionHistory";
+import { paymentService, type PaymentHistoryRecord } from "@/services/paymentService";
+
+type SemesterFilter = "Semester I" | "Semester II" | "all";
 
 const TransactionHistoryPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [records, setRecords] = useState<PaymentHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState<string | "all">("all");
-  const [selectedSemester, setSelectedSemester] = useState<"Semester 1" | "Semester 2" | "all">("all");
+  const [selectedSemester, setSelectedSemester] = useState<SemesterFilter>("all");
   const [targetTx, setTargetTx] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const currentUser = JSON.parse(localStorage.getItem("currentUser") || "{}");
 
   // Check if user is logged in
@@ -32,12 +34,18 @@ const TransactionHistoryPage = () => {
       }
 
       try {
-        const response = await transactionApi.getTransactionHistory(currentUser.customerId);
+        const response = await paymentService.getPaymentHistory();
         if (response.status === 200 && response.data) {
-          setTransactions(response.data);
+          setRecords(response.data.payments || []);
+          setError(null);
+        } else {
+          setRecords([]);
+          setError(response.error || "Failed to load payment history.");
         }
       } catch (error) {
         console.error("Failed to fetch transactions:", error);
+        setError("Unexpected error while fetching payment history.");
+        setRecords([]);
       } finally {
         setLoading(false);
       }
@@ -63,8 +71,10 @@ const TransactionHistoryPage = () => {
         setSelectedYear(y);
       }
     }
-    if (sem === "1") setSelectedSemester("Semester 1");
-    if (sem === "2") setSelectedSemester("Semester 2");
+    if (sem === "1") setSelectedSemester("Semester I");
+    if (sem === "2") setSelectedSemester("Semester II");
+    if (sem && sem.toLowerCase() === "semester i") setSelectedSemester("Semester I");
+    if (sem && sem.toLowerCase() === "semester ii") setSelectedSemester("Semester II");
     if (tx) setTargetTx(tx);
   }, [location.search]);
 
@@ -84,24 +94,27 @@ const TransactionHistoryPage = () => {
 
   const availableYears = Array.from(
     new Set(
-      transactions.flatMap((t) => (t.semesters || []).map((s) => s.schoolYear))
+      records.flatMap((record) =>
+        (record.tuitions || [])
+          .map((tuition) => tuition.academic_year)
+          .filter(Boolean)
+      )
     )
   ).sort((a, b) => {
     // Sort by the first year in the string (e.g., "2023-2024" -> 2023)
-    const yearA = parseInt(a.split("-")[0]);
-    const yearB = parseInt(b.split("-")[0]);
+    const yearA = parseInt(a?.split("-")[0] ?? "0");
+    const yearB = parseInt(b?.split("-")[0] ?? "0");
     return yearA - yearB;
   });
 
   const filteredTransactions =
     selectedYear === "all" && selectedSemester === "all"
-      ? transactions
-      : transactions.filter((t) => {
-          const semesters = t.semesters || [];
-          return semesters.some((s) => {
-            const yearMatch = selectedYear === "all" ? true : s.schoolYear === selectedYear;
-            const semMatch =
-              selectedSemester === "all" ? true : s.name === selectedSemester;
+      ? records
+      : records.filter((record) => {
+          const tuitions = record.tuitions || [];
+          return tuitions.some((tuition) => {
+            const yearMatch = selectedYear === "all" ? true : tuition.academic_year === selectedYear;
+            const semMatch = selectedSemester === "all" ? true : tuition.semester === selectedSemester;
             return yearMatch && semMatch;
           });
         });
@@ -164,18 +177,26 @@ const TransactionHistoryPage = () => {
                     id="filter-semester"
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     value={selectedSemester}
-                    onChange={(e) => setSelectedSemester(e.target.value as any)}
+                    onChange={(e) => setSelectedSemester(e.target.value as SemesterFilter)}
                   >
                     <option value="all">All semesters</option>
-                    <option value="Semester 1">Semester 1</option>
-                    <option value="Semester 2">Semester 2</option>
+                    <option value="Semester I">Semester I</option>
+                    <option value="Semester II">Semester II</option>
                   </select>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {transactions.length === 0 ? (
+          {error && (
+            <Card>
+              <CardContent className="py-4">
+                <p className="text-sm text-red-600">{error}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {records.length === 0 && !error ? (
             <Card>
               <CardContent className="py-8">
                 <p className="text-center text-muted-foreground">
@@ -185,7 +206,7 @@ const TransactionHistoryPage = () => {
             </Card>
           ) : (
             <TransactionHistory
-              transactions={filteredTransactions}
+              records={filteredTransactions}
               selectedYear={selectedYear === "all" ? null : selectedYear}
               selectedSemester={selectedSemester === "all" ? null : selectedSemester}
             />
