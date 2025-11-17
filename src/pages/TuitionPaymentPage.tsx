@@ -61,7 +61,9 @@ const TuitionPaymentPage = () => {
     async (message?: string) => {
       if (currentPaymentRef.current) {
         try {
-          await paymentService.cancelPayment(currentPaymentRef.current.id);
+          await paymentService.cancelPayment(currentPaymentRef.current.id, {
+            suppressUnauthorizedLogout: true,
+          });
         } catch (error) {
           console.error("Failed to cancel payment:", error);
         }

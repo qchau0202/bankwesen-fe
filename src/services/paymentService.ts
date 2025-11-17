@@ -258,9 +258,14 @@ export const paymentService = {
   },
 
   // POST: /api/payment/{paymentID}/cancel
-  cancelPayment: async (paymentId: string): Promise<{ status: number; error?: string }> => {
+  cancelPayment: async (
+    paymentId: string,
+    options?: { suppressUnauthorizedLogout?: boolean }
+  ): Promise<{ status: number; error?: string }> => {
     try {
-      const token = getTokenOrRedirect();
+      const token = getTokenOrRedirect(
+        options?.suppressUnauthorizedLogout ? { suppressRedirect: true } : undefined
+      );
       if (!token) {
         return { status: 401, error: "Unauthorized - Please login first" };
       }
@@ -279,7 +284,9 @@ export const paymentService = {
       });
 
       if (response.status === 401) {
-        handleUnauthorized();
+        if (!options?.suppressUnauthorizedLogout) {
+          handleUnauthorized();
+        }
         return { status: 401, error: "Session expired. Please login again." };
       }
 

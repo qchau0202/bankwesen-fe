@@ -26,17 +26,25 @@ export const handleUnauthorized = () => {
   redirectToLogin();
 };
 
-export const getTokenOrRedirect = (): string | null => {
+type TokenOptions = {
+  suppressRedirect?: boolean
+}
+
+export const getTokenOrRedirect = (options?: TokenOptions): string | null => {
   try {
     const token = localStorage.getItem("accessToken");
     if (!token) {
-      handleUnauthorized();
+      if (!options?.suppressRedirect) {
+        handleUnauthorized();
+      }
       return null;
     }
     return token;
   } catch (error) {
     console.error("Failed to read access token:", error);
-    handleUnauthorized();
+    if (!options?.suppressRedirect) {
+      handleUnauthorized();
+    }
     return null;
   }
 };
